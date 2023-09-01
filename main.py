@@ -1,80 +1,60 @@
-from typing import List
+from dotenv import load_dotenv
 import requests
-import time
-import json, yaml
 import discord
 import asyncio
 import decimal
+import os
 
-def get_price() -> dict:
+load_dotenv()
+
+
+TOKEN = os.environ["DISCORD_BOT_TOKEN"]
+GUILD_ID = os.environ["DISCORD_SERVER_ID"]
+DECIMAL_PLACES = 2  # Adjust as needed
+
+
+def get_account_balance() -> decimal.Decimal:
     """
-    Fetch price from Saucerswap API
+    Fetch balance from Hedera account
     """
     while True:
-        r = requests.get('https://api.saucerswap.finance/tokens')
+        r = requests.get('https://mainnet-public.mirrornode.hedera.com/api/v1/accounts/0.0.2997590')
         if r.status_code == 200:
-            return r.json()
+            data = r.json()
+            return decimal.Decimal(data['balance']['balance'])
         else:
             print(r.status_code)
-            time.sleep(10)
+            asyncio.sleep(100)  # Sleep for 100 seconds before retrying
 
-def main(ticker: str) -> None:
 
-    # 1. Load config
-    filename = 'crypto_config.yaml'
-    with open(filename) as f:
-        config = yaml.load(f, Loader=yaml.Loader)[ticker] # Get passed ticker from yaml file
-        print(config)
+intents = discord.Intents.default()
+intents.message_content = True
+client = discord.Client(intents=intents)
 
-    # 2. Connect w the bot
-    intents = discord.Intents.default()
-    intents.message_content = True
-    client = discord.Client(intents=intents)
 
-    async def send_update(priceList, numDecimalPlace=None):
-        if numDecimalPlace == 0:
-            numDecimalPlace = None  # round(2.3, 0) -> 2.0 but we don't want ".0"
+async def send_update(balance: decimal.Decimal, numDecimalPlace=None):
+    if numDecimalPlace is not None:
+        balance = round(balance, numDecimalPlace) / 100000000 # Convert from TH to H
+        balance_str = format(balance, f'.{numDecimalPlace}f')
+    else:
+        balance_str = format(balance, '.1f')
 
-        price_now = priceList['priceUsd']
+    guild = client.get_guild(int(GUILD_ID))
+    if guild:
+        await guild.me.edit(nick=f'{balance_str} HBAR')
 
-        if numDecimalPlace is not None:
-            price_now = round(price_now, numDecimalPlace)
-            price_now = format(decimal.Decimal(price_now), f'.{numDecimalPlace}f')
-        else:
-            # Format as standard decimal, not scientific notation
-            price_now = format(decimal.Decimal(price_now), '.6f')
+    await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Treasure Chest"))
+    await asyncio.sleep(10000)  # 24 hours
 
-        for guildId in config['guildId']:
-            await client.get_guild(guildId).me.edit(nick=f'${price_now}')
 
-        await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name=ticker))
-        await asyncio.sleep(config['updateFreq'])  # in seconds
+@client.event
+async def on_ready():
+    """
+    When discord client is ready
+    """
+    while True:
+        balance = get_account_balance()
+        await send_update(balance, DECIMAL_PLACES)
 
-    @client.event
-    async def on_ready():
-        """
-        When discord client is ready
-        """
-        while True:
-            # 3. Fetch price
-            priceList = get_price()
-            ssToken = []
-            for token in priceList:
-                if token['symbol'] == ticker:
-                    ssToken = token
 
-            print(ssToken)
-
-            # 4. Feed it to the bot
-            await send_update(ssToken, config['decimalPlace'][0])
-
-    client.run(config['discordBotKey'])
-
-if __name__ == '__main__':
-    import argparse
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument('-t', '--ticker',
-                        action='store')
-    args = parser.parse_args()
-    main(ticker=args.ticker)
+client.run(TOKEN)
