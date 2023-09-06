@@ -44,7 +44,7 @@ async def send_update(balance: decimal.Decimal, numDecimalPlace=None):
         await guild.me.edit(nick=f'{balance_str} HBAR')
 
     await client.change_presence(activity=discord.Activity(type=discord.ActivityType.watching, name="Treasure Chest"))
-    await asyncio.sleep(10000)  # 24 hours
+    await asyncio.sleep(100)  # 100 seconds
 
 
 @client.event
